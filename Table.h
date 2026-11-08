@@ -7,7 +7,8 @@
 #include "Player.h"
 #include "ConsoleUI.h"
 #include <vector>
-
+#include "PerfectPairs.h"
+#include "TwentyOnePlusThree.h"
 // The central game controller that owns all entities and orchestrates the flow of the game.
 class Table {
 public:
