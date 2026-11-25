@@ -31,6 +31,8 @@ private:
     int currentCardIndex;    // Tracks the position of the next card to be dealt
     int totalDecks;          // The total number of standard 52-card decks in this shoe
     std::mt19937 rng;        // Standard Mersenne Twister engine for randomizing card order
+    int numDecks;
+    unsigned int seed;
 };
 
 #endif
