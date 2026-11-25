@@ -1,4 +1,4 @@
-    #ifndef SEAT_H
+#ifndef SEAT_H
 #define SEAT_H
 
 #include "Hand.h"
