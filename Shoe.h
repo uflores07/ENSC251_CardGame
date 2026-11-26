@@ -1,3 +1,10 @@
+/*
+ * Declares the Shoe class: the box of shuffled cards the dealer deals from
+ * By default it holds 6 standard decks (312 cards) shuffled with std::mt19937
+ * The same seed always gives the same card order, so games and tests can be repeated
+ * When fewer than 78 cards are left, needsReshuffle() returns true and Table calls shuffle()
+ */
+
 #ifndef SHOE_H
 #define SHOE_H
 

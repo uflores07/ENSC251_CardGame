@@ -1,3 +1,12 @@
+/*
+ * Declares the Card class: one standard playing card with a rank and a suit.
+ * A Card can report its Blackjack value and give 
+ * short text for the console, such as "KH" or "10S"
+ * Ranks are numbered 2-14 (TWO = 2 ... TEN = 10, JACK = 11, QUEEN = 12,
+ * KING = 13, ACE = 14). Suits are HEARTS, DIAMONDS, CLUBS, SPADES (0-3)
+ * Hand.cpp turns an Ace from 11 into 1 when needed; Card always reports 11
+ */
+
 #ifndef CARD_H
 #define CARD_H
 

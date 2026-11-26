@@ -1,3 +1,11 @@
+/* 
+ * Declares the Dealer class: the house player and the dealer's hand
+ * The dealer has one face-up card (the upcard) and one face-down card (the hole card)
+ * The dealer checks for blackjack during the peek, and plays by fixed house rules:
+ * hit until the total is 17 or more, and stand on all 17s, including soft 17
+ * Most of the work is done by the Hand class, which the dealer holds
+ */
+
 #ifndef DEALER_H
 #define DEALER_H
 

@@ -1,3 +1,10 @@
+/*
+ * Declares the Hand class: one hand of cards plus the bet on it
+ * Calculates the Blackjack total (Aces as 1 or 11), detects soft hands,
+ * blackjack and busts, and tracks double-down, split and finished flags
+ * Money is stored in cents as long long
+ */
+
 #ifndef HAND_H
 #define HAND_H
 
