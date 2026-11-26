@@ -1,8 +1,4 @@
 /*
- * File:    Shoe.cpp
- * Author:  Guillermo
- * Project: Blackjack
- *
  * Implements the Shoe class declared in Shoe.h
  * Builds the decks, shuffles them with the seeded std::mt19937, deals from the top,
  * and reports when fewer than 78 cards are left so Table knows to reshuffle
