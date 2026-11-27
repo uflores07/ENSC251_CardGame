@@ -4,13 +4,25 @@
 #include <string>
 #include <algorithm>
 
+// ============================================================================
+// Constructor: runs automatically once when a Table object is created.
+// ": shoe(Rules::NUM_DECKS)" initializes the Shoe with 6 decks before the body runs.
+// ============================================================================
 Table::Table() : shoe(Rules::NUM_DECKS) {
+    // Create the 6 physical seats at the table (numbered 1 through 6)
     for (int i = 1; i <= 6; ++i) {
         seats.push_back(Seat(i));
     }
+
+    // Build and randomize the cards in the shoe so we're ready to deal
     shoe.shuffle();
 }
 
+// ============================================================================
+// Destructor: runs automatically when the Table object is destroyed (game ends).
+// Frees any dynamically allocated (created with `new`) SideBet objects still on seats.
+// Note: If Seat::~Seat() already deletes SideBet*, remove this loop to avoid double-free.
+// ============================================================================
 Table::~Table() {
     for (Seat& seat : seats) {
         for (SideBet* sb : seat.getSideBets()) {
@@ -19,28 +31,49 @@ Table::~Table() {
     }
 }
 
+// ============================================================================
+// Main Game Loop: the "conductor" that runs Blackjack round by round
+// until every player runs out of money or chooses to stop playing.
+// ============================================================================
 void Table::runGame() {
-        initializeGame();
+    // One-time setup: ask how many players (1-6) and get their names
+    initializeGame();
+
+    // Repeat one full round of Blackjack as long as at least one player remains
     while (!players.empty()) {
-        // 1. Check if shoe needs reshuffling
+        // 1. Reshuffle the shoe if it is running low on cards
         if (shoe.needsReshuffle()) {
             ui.displayMessage("Reshuffling the shoe...");
             shoe.shuffle();
         }
-        // 2-6. Setup, deal, and immediate checks
+
+        // 2. Let each player pick 1 (or more) open seats at the table
         assignSeats();
+
+        // 3. Collect main bets and optional side bets for every occupied seat
         takeBets();
+
+        // 4. Deal 2 starting cards to each occupied seat and to the dealer
         dealInitialCards();
+
+        // 5. Side bets only depend on the first 2 player cards + dealer upcard,
+        //    so they are settled immediately after the deal
         settleSideBets();
+
+        // 6. Offer insurance if dealer shows an Ace, and peek for dealer Blackjack
         handleInsurance();
-        // 7. Play out seats and dealer only if dealer does not have Blackjack
+
+        // 7. Only let players and the dealer take turns if the dealer did NOT
+        //    already get an instant Blackjack
         if (!dealer.hasBlackjack()) {
             playSeats();
             playDealer();
         }
-        // 8. Compare hands and pay winners
+
+        // 8. Compare each player's final hand(s) against the dealer and pay winners
         settleMainBets();
-        // 9. Reset round state
+
+        // 9. Clear cards, bets, and seat assignments so the table is clean for next round
         dealer.clearHand();
         for (Seat& seat : seats) {
             seat.clearSeat();
@@ -48,55 +81,71 @@ void Table::runGame() {
         for (Player& player : players) {
             player.clearSeats();
         }
-        // 10. Evict broke players
+
+        // 10. Remove any players who can no longer afford the table minimum bet
         removeBrokePlayers();
-        // 11. Ask to play another round
+
+        // 11. If players are still left, ask if they want to play another round
         if (!players.empty()) {
             if (!ui.promptForYesNo("Play another round?")) {
-                break;
+                break; // Exit the while loop and end the game
             }
         }
     }
+
     ui.displayMessage("Thanks for playing!");
 }
+
+// ============================================================================
+// Sets up the players once at the start of the game.
+// ============================================================================
 void Table::initializeGame() {
+    // Safely ask for an integer between 1 and 6
     int numPlayers = ui.promptForInt("How many Players?", 1, 6);
+
+    // Ask for each player's name, create a Player object, and store it in `players`.
+    // std::to_string(i) converts the integer `i` into text so we can join it with "+".
     for (int i = 1; i <= numPlayers; ++i) {
         players.push_back(Player(ui.promptForString("Enter name for Player " + std::to_string(i) + ":")));
     }
+
+    // Show everyone's starting bankroll
     ui.displayBankrolls(players);
-
-    // External functions used:
-    //   ConsoleUI::promptForInt(prompt, min, max)
-    //   ConsoleUI::promptForString(prompt)
-    //   ConsoleUI::displayBankrolls(players)
-    //   Player::Player(std::string playerName)
-
-    // TODO: Prompt for number of players (1-6) using ui.promptForInt(...)
-    // TODO: For each player, prompt for their name using ui.promptForString(...)
-    //       and push_back(Player(name)) into `players`
-    // TODO: Display initial bankrolls using ui.displayBankrolls(players)
 }
 
+// ============================================================================
+// Lets each human player claim one or more of the 6 physical seats for this round.
+// ============================================================================
 void Table::assignSeats() {
-    int occupiedCount = 0;
-    for(Player& player : players){
+    int occupiedCount = 0; // Tracks how many of the 6 table seats are taken so far
+
+    // Use `Player&` (reference) so changes via player.addSeat() modify the real Player,
+    // not a temporary copy.
+    for (Player& player : players) {
         bool pickingSeats = true;
 
-        while ((occupiedCount<6)&&pickingSeats){
-            int seatNum = ui.promptForInt(player.getName() + ", choose any open seat from (1-6)", 1, 6
+        // Keep asking this player for seats until they say no or all 6 seats are full
+        while (occupiedCount < 6 && pickingSeats) {
+            int seatNum = ui.promptForInt(
+                player.getName() + ", choose any open seat from (1-6):", 1, 6
             );
-            if (seats[seatNum-1].isOccupied()){
-             ui.displayMessage("Seat " + std::to_string(seatNum) + " is already taken. Try again.");
-                continue;
-            }   
 
-            seats[seatNum-1].assignPlayer(&player);
+            // Seats are numbered 1-6 for the user, but stored at indexes 0-5 in the vector
+            if (seats[seatNum - 1].isOccupied()) {
+                ui.displayMessage("Seat " + std::to_string(seatNum) + " is already taken. Try again.");
+                continue; // Skip the rest of this turn and ask again
+            }
+
+            // Link the seat and the player together.
+            // `&player` passes the memory address of the real Player to the Seat.
+            seats[seatNum - 1].assignPlayer(&player);
             player.addSeat(seatNum);
             ++occupiedCount;
 
+            // Check if the player has enough money to cover MIN_BET on one more seat
             int nextSeatsCount = player.getSeats().size() + 1;
             bool canAffordAnother = player.getBankroll()->canAfford(Rules::MIN_BET * nextSeatsCount);
+
             if (occupiedCount < 6 && canAffordAnother) {
                 pickingSeats = ui.promptForYesNo(player.getName() + ", would you like another seat?");
             } else {
@@ -106,95 +155,104 @@ void Table::assignSeats() {
     }
 }
 
+// ============================================================================
+// Walks through all 6 seats and collects main bets + optional side bets
+// from every seat that has a player sitting in it.
+// ============================================================================
 void Table::takeBets() {
+    // Loop by index `i` (0..5) so we can display the seat number as `i + 1`
     for (size_t i = 0; i < seats.size(); ++i) {
+        // `Seat&` is a reference to the real seat in `seats[i]` (not a copy)
         Seat& seat = seats[i];
+
+        // If nobody is sitting at this seat, skip it and move to the next seat
         if (!seat.isOccupied()) {
             continue;
         }
-    Player* p = seat.getPlayer();
-    Bankroll* br = p->getBankroll();
-    int maxAllowed = std::min(Rules::MAX_BET, br->getBalanceCents());
-    int mainBet = ui.promptForInt(
+
+        // Get pointers to the player sitting here and their bankroll (`->` accesses pointer members)
+        Player* p = seat.getPlayer();
+        Bankroll* br = p->getBankroll();
+
+        // Player cannot bet more than the table max OR more than they currently have
+        int maxAllowed = std::min(Rules::MAX_BET, br->getBalanceCents());
+
+        // Ask for the main bet, deduct it from the player's bankroll, and create their starting Hand
+        int mainBet = ui.promptForInt(
             p->getName() + " (Seat " + std::to_string(i + 1) + ") enter main bet:",
-            Rules::MIN_BET, 
+            Rules::MIN_BET,
             maxAllowed
         );
         br->deduct(mainBet);
         seat.addHand(Hand(mainBet));
+
+        // Optional Perfect Pairs side bet (only offered if player can still afford MIN_BET)
         if (br->canAfford(Rules::MIN_BET) &&
             ui.promptForYesNo(p->getName() + ", place a Perfect Pairs side bet?")) {
             int maxSide = std::min(Rules::MAX_BET, br->getBalanceCents());
             int sideWager = ui.promptForInt("Enter Perfect Pairs wager:", Rules::MIN_BET, maxSide);
+
+            // Allocate on the heap with `new` because Seat stores base-class SideBet* pointers
             SideBet* sb = new PerfectPairs(Rules::MIN_BET, Rules::MAX_BET);
             sb->placeBet(sideWager);
             br->deduct(sideWager);
             seat.addSideBet(sb);
         }
+
         // Optional 21+3 side bet
         if (br->canAfford(Rules::MIN_BET) &&
             ui.promptForYesNo(p->getName() + ", place a 21+3 side bet?")) {
             int maxSide = std::min(Rules::MAX_BET, br->getBalanceCents());
             int sideWager = ui.promptForInt("Enter 21+3 wager:", Rules::MIN_BET, maxSide);
+
             SideBet* sb = new TwentyOnePlusThree(Rules::MIN_BET, Rules::MAX_BET);
             sb->placeBet(sideWager);
             br->deduct(sideWager);
             seat.addSideBet(sb);
-            }}}
-    // External functions used:
-    //   Seat::isOccupied(), Seat::getPlayer(), Seat::addHand(Hand), Seat::addSideBet(SideBet*)
-    //   Player::getName(), Player::getBankroll()
-    //   Bankroll::getBalanceCents(), Bankroll::canAfford(int), Bankroll::deduct(int)
-    //   Rules::MIN_BET, Rules::MAX_BET
-    //   Hand::Hand(int initialBet)
-    //   PerfectPairs::PerfectPairs(int minBet, int maxBet)
-    //   TwentyOnePlusThree::TwentyOnePlusThree(int minBet, int maxBet)
-    //   SideBet::placeBet(int amount)
-    //   ConsoleUI::promptForInt(prompt, min, max), ConsoleUI::promptForYesNo(prompt)
+        }
+    }
+}
 
-    // TODO: For each occupied seat in `seats`:
-    //   - Get Player* p = seat.getPlayer() and Bankroll* br = p->getBankroll()
-    //   - Prompt for main bet between Rules::MIN_BET and std::min(Rules::MAX_BET, balance)
-    //   - Call br->deduct(bet) and seat.addHand(Hand(bet))
-    //   - Offer PerfectPairs and TwentyOnePlusThree side bets via ui.promptForYesNo(...):
-    //       if yes & br->canAfford(...):
-    //         allocate with `new PerfectPairs(...)` / `new TwentyOnePlusThree(...)`
-    //         call sb->placeBet(sideWager), br->deduct(sideWager), seat.addSideBet(sb)
-
+// ============================================================================
+// Deals 2 initial cards to every occupied seat and the dealer in casino order:
+// 1st card to each seat then dealer, then 2nd card to each seat then dealer.
+// ============================================================================
 void Table::dealInitialCards() {
     for (int pass = 0; pass < 2; ++pass) {
         for (Seat& seat : seats) {
             if (seat.isOccupied()) {
+                // getHand(0) gets the seat's first (and currently only) hand
                 seat.getHand(0).addCard(shoe.dealCard());
             }
         }
         dealer.addCard(shoe.dealCard());
     }
+
+    // Show the table and the dealer's hand (`true` hides the dealer's 2nd "hole" card)
     ui.displayTable(*this);
     ui.displayDealer(dealer, true);
-    // External functions used:
-    //   Shoe::dealCard()
-    //   Seat::isOccupied(), Seat::getHand(int index)
-    //   Hand::addCard(Card)
-    //   Dealer::addCard(Card)
-    //   ConsoleUI::displayTable(const Table&), ConsoleUI::displayDealer(const Dealer&, bool)
-
-    // TODO: Deal in two passes (1st card to each occupied seat's getHand(0), then dealer;
-    //       2nd card to each occupied seat's getHand(0), then dealer) using shoe.dealCard()
-    // TODO: Display the table with ui.displayTable(*this) and/or ui.displayDealer(dealer, true)
 }
 
+// ============================================================================
+// Evaluates and pays out Perfect Pairs / 21+3 side bets right after the deal.
+// ============================================================================
 void Table::settleSideBets() {
-     Card upcard = dealer.getUpcard();
-      for (Seat& seat : seats) {
+    Card upcard = dealer.getUpcard(); // Dealer's visible card (needed for 21+3)
+
+    for (Seat& seat : seats) {
         if (!seat.isOccupied()) {
             continue;
         }
-    std::vector<Card> cards = seat.getHand(0).getCards();
+
+        // Safety check: make sure the hand actually has 2 cards before reading cards[0] and cards[1]
+        std::vector<Card> cards = seat.getHand(0).getCards();
         if (cards.size() < 2) {
             continue;
         }
-         Player* p = seat.getPlayer();
+
+        Player* p = seat.getPlayer();
+
+        // Check every side bet placed on this seat (polymorphism calls the right calculatePayout)
         for (SideBet* sb : seat.getSideBets()) {
             int payout = sb->calculatePayout(cards[0], cards[1], upcard);
             if (payout > 0) {
@@ -207,51 +265,46 @@ void Table::settleSideBets() {
             }
         }
     }
-    // External functions used:
-    //   Dealer::getUpcard()
-    //   Seat::isOccupied(), Seat::getHand(int), Seat::getSideBets(), Seat::getPlayer()
-    //   Hand::getCards()
-    //   SideBet::calculatePayout(Card, Card, Card), SideBet::getName(), SideBet::getWager()
-    //   Player::getName(), Player::getBankroll()
-    //   Bankroll::add(int)
-    //   ConsoleUI::displayMessage(msg)
-
-    // TODO: Card upcard = dealer.getUpcard()
-    // TODO: For each occupied seat:
-    //   - Get cards = seat.getHand(0).getCards() (use cards[0] and cards[1])
-    //   - For each SideBet* sb in seat.getSideBets():
-    //       int payout = sb->calculatePayout(cards[0], cards[1], upcard)
-    //       if payout > 0:
-    //         seat.getPlayer()->getBankroll()->add(payout)
-    //         ui.displayMessage(...) with sb->getName() and payout
 }
 
-
-
+// ============================================================================
+// Step 1: If dealer shows an Ace (11), offer insurance (costs half of main bet).
+// Step 2: If dealer shows an Ace (11) or 10-value card, peek for dealer Blackjack.
+//         If dealer has Blackjack, reveal the hole card and pay winning insurance bets.
+// ============================================================================
 void Table::handleInsurance() {
     int upcardVal = dealer.getUpcard().getValue();
-    if (dealer.getUpcard().getValue() == 11){
+
+    // Step 1: Offer insurance only when dealer's face-up card is an Ace (value 11)
+    if (upcardVal == 11) {
         for (Seat& seat : seats) {
-        if (!seat.isOccupied()) {
-            continue;
-        }
-        if (!Rules::isLegalInsurance(seat.getHand(0))) {
+            if (!seat.isOccupied()) {
                 continue;
             }
-        Player* p = seat.getPlayer();
-        Bankroll* br = p->getBankroll();
-        int maxIns = seat.getHand(0).getBet() / 2;
-        if (maxIns > 0 && br->canAfford(maxIns) &&
+            if (!Rules::isLegalInsurance(seat.getHand(0))) {
+                continue;
+            }
+
+            Player* p = seat.getPlayer();
+            Bankroll* br = p->getBankroll();
+            int maxIns = seat.getHand(0).getBet() / 2; // Insurance costs half of the main bet
+
+            // Only offer insurance if the player has enough remaining funds to cover it
+            if (maxIns > 0 && br->canAfford(maxIns) &&
                 ui.promptForYesNo(p->getName() + ", buy insurance for " + std::to_string(maxIns) + "?")) {
                 br->deduct(maxIns);
                 seat.setInsuranceBet(maxIns);
             }
         }
     }
-   if (upcardVal == 11 || upcardVal == 10) {
+
+    // Step 2: Dealer always peeks when upcard is an Ace (11) or a 10/J/Q/K (10)
+    if (upcardVal == 11 || upcardVal == 10) {
         if (dealer.hasBlackjack()) {
             ui.displayMessage("Dealer has Blackjack!");
-            ui.displayDealer(dealer, false);
+            ui.displayDealer(dealer, false); // `false` reveals the dealer's hidden hole card
+
+            // Pay 2:1 to every seat that bought insurance
             for (Seat& seat : seats) {
                 if (!seat.isOccupied()) {
                     continue;
@@ -267,56 +320,45 @@ void Table::handleInsurance() {
             }
         }
     }
-
-    // External functions used:
-    //   Dealer::getUpcard(), Dealer::hasBlackjack()
-    //   Card::getValue()
-    //   Seat::isOccupied(), Seat::getHand(int), Seat::getPlayer(),
-    //     Seat::setInsuranceBet(int), Seat::getInsuranceBet()
-    //   Hand::getBet()
-    //   Rules::isLegalInsurance(const Hand&)
-    //   Player::getName(), Player::getBankroll()
-    //   Bankroll::canAfford(int), Bankroll::deduct(int), Bankroll::add(int)
-    //   Payout::calculateInsurancePayout(int)
-    //   ConsoleUI::promptForYesNo(prompt), ConsoleUI::displayDealer(const Dealer&, bool),
-    //     ConsoleUI::displayMessage(msg)
-
-    // TODO: If dealer.getUpcard().getValue() == 11 (Ace):
-    //   - For each occupied seat where Rules::isLegalInsurance(seat.getHand(0)):
-    //       int maxIns = seat.getHand(0).getBet() / 2
-    //       if player->getBankroll()->canAfford(maxIns) and ui.promptForYesNo(...):
-    //         br->deduct(maxIns)
-    //         seat.setInsuranceBet(maxIns)
-    // TODO: If dealer upcard value is 11 or 10, peek with dealer.hasBlackjack():
-    //   - If true:
-    //       ui.displayDealer(dealer, false)
-    //       for each occupied seat with seat.getInsuranceBet() > 0:
-    //         int pay = Payout::calculateInsurancePayout(seat.getInsuranceBet())
-    //         seat.getPlayer()->getBankroll()->add(pay)
-    //         ui.displayMessage(...)
 }
 
+// ============================================================================
+// Lets each occupied seat play out all of its hands (Hit, Stand, Double, Split).
+// ============================================================================
 void Table::playSeats() {
-     for (Seat& seat : seats) {
+    for (Seat& seat : seats) {
         if (!seat.isOccupied()) {
             continue;
         }
+
         Player* p = seat.getPlayer();
         Bankroll* br = p->getBankroll();
+
+        // Use an index loop (instead of range-for) because splitting adds a new hand
+        // to the seat, increasing seat.getNumHands() while we are looping!
         for (int h = 0; h < seat.getNumHands(); ++h) {
-            while(!seat.getHand(h).isFinished()){
+            // Keep prompting until this hand stands, busts, doubles, or hits 21
+            while (!seat.getHand(h).isFinished()) {
                 Hand& hand = seat.getHand(h);
+
+                // Auto-finish if the player already has Blackjack or 21
                 if (hand.isBlackjack() || hand.getTotal() == 21) {
                     hand.setFinished(true);
                     break;
                 }
+
+                // Show current hand and dealer's upcard (hole card still hidden)
                 ui.displayHand(hand, p->getName());
                 ui.displayDealer(dealer, true);
-                                bool canDouble = Rules::isLegalDouble(hand) && br->canAfford(hand.getBet());
+
+                // Check which special moves are both legal by Blackjack rules AND affordable
+                bool canDouble = Rules::isLegalDouble(hand) && br->canAfford(hand.getBet());
                 bool canSplit  = Rules::isLegalSplit(hand, seat.getNumHands()) && br->canAfford(hand.getBet());
+
                 // Assumes ConsoleUI::promptForMove returns: 1=Hit, 2=Stand, 3=Double, 4=Split
                 int move = ui.promptForMove(p->getName() + ", choose your move:", canDouble, canSplit);
-                if (move == 1) { // Hit
+
+                if (move == 1) { // Hit: draw 1 card
                     hand.addCard(shoe.dealCard());
                     if (hand.isBust()) {
                         ui.displayHand(hand, p->getName());
@@ -325,9 +367,9 @@ void Table::playSeats() {
                     } else if (hand.getTotal() == 21) {
                         hand.setFinished(true);
                     }
-                } else if (move == 2) { // Stand
+                } else if (move == 2) { // Stand: keep current total and end turn on this hand
                     hand.setFinished(true);
-                } else if (move == 3 && canDouble) { // Double
+                } else if (move == 3 && canDouble) { // Double Down: double bet, draw 1 card, and finish
                     br->deduct(hand.getBet());
                     hand.doubleBet();
                     hand.setDoubled(true);
@@ -337,82 +379,59 @@ void Table::playSeats() {
                         ui.displayMessage(p->getName() + " busts!");
                     }
                     hand.setFinished(true);
-                } else if (move == 4 && canSplit) { // Split
+                } else if (move == 4 && canSplit) { // Split: pay matching bet, split into 2 hands, deal 1 card each
                     br->deduct(hand.getBet());
                     seat.splitHand(h);
-                    // Re-fetch via getHand() because splitHand() may reallocate the vector
+                    // Re-fetch via seat.getHand(...) instead of using `hand` because
+                    // splitHand() may resize the hands vector in memory
                     seat.getHand(h).addCard(shoe.dealCard());
                     seat.getHand(seat.getNumHands() - 1).addCard(shoe.dealCard());
                 }
             }
         }
     }
-        
-    // External functions used:
-    //   Seat::isOccupied(), Seat::getPlayer(), Seat::getNumHands(),
-    //     Seat::getHand(int), Seat::splitHand(int)
-    //   Player::getName(), Player::getBankroll()
-    //   Bankroll::canAfford(int), Bankroll::deduct(int)
-    //   Hand::isFinished(), Hand::isBlackjack(), Hand::getTotal(), Hand::isBust(),
-    //     Hand::getBet(), Hand::addCard(Card), Hand::doubleBet(),
-    //     Hand::setDoubled(bool), Hand::setFinished(bool)
-    //   Rules::isLegalHit(const Hand&), Rules::isLegalStand(const Hand&),
-    //     Rules::isLegalDouble(const Hand&), Rules::isLegalSplit(const Hand&, int)
-    //   Shoe::dealCard()
-    //   ConsoleUI::displayHand(const Hand&, std::string),
-    //     ConsoleUI::displayDealer(const Dealer&, bool),
-    //     ConsoleUI::promptForMove(std::string, bool, bool),
-    //     ConsoleUI::displayMessage(msg)
-
-    // TODO: For each occupied seat:
-    //   - Loop by index: for (int h = 0; h < seat.getNumHands(); ++h)
-    //     - While !seat.getHand(h).isFinished():
-    //       - If hand.isBlackjack() || hand.getTotal() == 21 -> hand.setFinished(true); break;
-    //       - ui.displayHand(hand, player->getName()) and ui.displayDealer(dealer, true)
-    //       - bool canDouble = Rules::isLegalDouble(hand) && br->canAfford(hand.getBet())
-    //       - bool canSplit  = Rules::isLegalSplit(hand, seat.getNumHands()) && br->canAfford(hand.getBet())
-    //       - int move = ui.promptForMove(..., canDouble, canSplit)
-    //       - Hit:    hand.addCard(shoe.dealCard()); if (hand.isBust() || hand.getTotal() == 21) hand.setFinished(true);
-    //       - Stand:  hand.setFinished(true);
-    //       - Double: br->deduct(hand.getBet()); hand.doubleBet(); hand.setDoubled(true);
-    //                 hand.addCard(shoe.dealCard()); hand.setFinished(true);
-    //       - Split:  br->deduct(hand.getBet()); seat.splitHand(h);
-    //                 deal 1 card to seat.getHand(h) and 1 card to the newly created hand
 }
 
+// ============================================================================
+// Plays out the dealer's turn automatically according to house rules
+// (reveal hole card, then keep hitting while dealer.shouldHit() is true).
+// ============================================================================
 void Table::playDealer() {
-    // External functions used:
-    //   Dealer::shouldHit(), Dealer::addCard(Card)
-    //   Shoe::dealCard()
-    //   ConsoleUI::displayDealer(const Dealer&, bool)
-
-    // TODO: Reveal dealer hole card via ui.displayDealer(dealer, false)
-    // TODO: While dealer.shouldHit():
-    //   - dealer.addCard(shoe.dealCard())
-    //   - ui.displayDealer(dealer, false)
     ui.displayMessage("Dealer's turn:");
-    ui.displayDealer(dealer, false);
+    ui.displayDealer(dealer, false); // Reveal hole card
+
     while (dealer.shouldHit()) {
         dealer.addCard(shoe.dealCard());
         ui.displayDealer(dealer, false);
     }
 }
 
+// ============================================================================
+// Compares every hand at every occupied seat against the dealer's final hand,
+// adds any winnings to the player's bankroll, and prints updated balances.
+// ============================================================================
 void Table::settleMainBets() {
-     Hand dealerHand = dealer.getHand();
+    Hand dealerHand = dealer.getHand();
+
     for (Seat& seat : seats) {
         if (!seat.isOccupied()) {
             continue;
         }
+
         Player* p = seat.getPlayer();
         Bankroll* br = p->getBankroll();
+
+        // Check every hand at this seat (1 normally, or up to 4 if the player split)
         for (int h = 0; h < seat.getNumHands(); ++h) {
             Hand& hand = seat.getHand(h);
             Payout::Result res = Payout::determineResult(hand, dealerHand);
             int winnings = Payout::calculateWinnings(res, hand.getBet());
+
+            // Pay winnings (for WIN, BLACKJACK, or returned bet on PUSH)
             if (winnings > 0) {
                 br->add(winnings);
             }
+
             if (res == Payout::BLACKJACK) {
                 ui.displayMessage(p->getName() + " got BLACKJACK! Won " + std::to_string(winnings));
             } else if (res == Payout::WIN) {
@@ -424,46 +443,23 @@ void Table::settleMainBets() {
             }
         }
     }
+
+    // Show updated bankrolls for all players at the end of the round
     ui.displayBankrolls(players);
 }
-    // External functions used:
-    //   Dealer::getHand()
-    //   Seat::isOccupied(), Seat::getPlayer(), Seat::getNumHands(), Seat::getHand(int)
-    //   Hand::getBet()
-    //   Payout::Result (BLACKJACK, WIN, PUSH, LOSS)
-    //   Payout::determineResult(const Hand&, const Hand&)
-    //   Payout::calculateWinnings(Payout::Result, int)
-    //   Player::getName(), Player::getBankroll()
-    //   Bankroll::add(int)
-    //   ConsoleUI::displayMessage(msg), ConsoleUI::displayBankrolls(players)
 
-    // TODO: Hand dealerHand = dealer.getHand()
-    // TODO: For each occupied seat and each hand h in 0 .. seat.getNumHands() - 1:
-    //   - Payout::Result res = Payout::determineResult(hand, dealerHand)
-    //   - int winnings = Payout::calculateWinnings(res, hand.getBet())
-    //   - If winnings > 0 -> seat.getPlayer()->getBankroll()->add(winnings)
-    //   - Announce BLACKJACK / WIN / PUSH / LOSS via ui.displayMessage(...)
-    // TODO: Display updated balances via ui.displayBankrolls(players)
-
-
+// ============================================================================
+// Removes any players who no longer have enough money to place the minimum bet.
+// Uses an iterator loop because erasing inside a range-for loop is unsafe.
+// ============================================================================
 void Table::removeBrokePlayers() {
-    // External functions used:
-    //   Player::getName(), Player::getBankroll()
-    //   Bankroll::canAfford(int)
-    //   Rules::MIN_BET
-    //   ConsoleUI::displayMessage(msg)
-    // TODO: Iterate through `players` with an iterator:
-    //   - If !it->getBankroll()->canAfford(minBet):
-    //       ui.displayMessage(it->getName() + " is out of funds and leaves the table.")
-    //       it = players.erase(it)
-    //   - Else:
-    //       ++it
     for (auto it = players.begin(); it != players.end(); ) {
         if (!it->getBankroll()->canAfford(Rules::MIN_BET)) {
             ui.displayMessage(it->getName() + " is out of funds and leaves the table.");
+            // erase() removes the player and returns a valid iterator to the next player
             it = players.erase(it);
         } else {
-            ++it;
+            ++it; // Only advance manually when we did NOT erase
         }
     }
 }
