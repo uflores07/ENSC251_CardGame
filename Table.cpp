@@ -3,19 +3,18 @@
 #include "Payout.h"
 #include <string>
 #include <algorithm>
+#include <random>
 
 // ============================================================================
 // Constructor: runs automatically once when a Table object is created.
-// ": shoe(Rules::NUM_DECKS)" initializes the Shoe with 6 decks before the body runs.
+// ": shoe(Rules::NUM_DECKS, ...)" initializes and shuffles the Shoe with 6 decks
+// using a random seed before the body runs (Shoe's constructor already shuffles).
 // ============================================================================
-Table::Table() : shoe(Rules::NUM_DECKS) {
+Table::Table() : shoe(Rules::NUM_DECKS, std::random_device{}()) {
     // Create the 6 physical seats at the table (numbered 1 through 6)
     for (int i = 1; i <= 6; ++i) {
         seats.push_back(Seat(i));
     }
-
-    // Build and randomize the cards in the shoe so we're ready to deal
-    shoe.shuffle();
 }
 
 // ============================================================================
@@ -119,13 +118,15 @@ void Table::initializeGame() {
 void Table::assignSeats() {
     int occupiedCount = 0; // Tracks how many of the 6 table seats are taken so far
 
-    // Use `Player&` (reference) so changes via player.addSeat() modify the real Player,
-    // not a temporary copy.
-    for (Player& player : players) {
+    // Loop by index so we can reserve at least 1 seat for every remaining player
+    for (size_t pIdx = 0; pIdx < players.size(); ++pIdx) {
+        Player& player = players[pIdx];
+        int remainingPlayers = static_cast<int>(players.size() - pIdx - 1);
+        int maxOccupiedForThisPlayer = 6 - remainingPlayers;
         bool pickingSeats = true;
 
-        // Keep asking this player for seats until they say no or all 6 seats are full
-        while (occupiedCount < 6 && pickingSeats) {
+        // Keep asking this player for seats until they say no or no extra seats remain
+        while (occupiedCount < maxOccupiedForThisPlayer && pickingSeats) {
             int seatNum = ui.promptForInt(
                 player.getName() + ", choose any open seat from (1-6):", 1, 6
             );
@@ -143,10 +144,10 @@ void Table::assignSeats() {
             ++occupiedCount;
 
             // Check if the player has enough money to cover MIN_BET on one more seat
-            int nextSeatsCount = player.getSeats().size() + 1;
+            int nextSeatsCount = static_cast<int>(player.getSeats().size()) + 1;
             bool canAffordAnother = player.getBankroll()->canAfford(Rules::MIN_BET * nextSeatsCount);
 
-            if (occupiedCount < 6 && canAffordAnother) {
+            if (occupiedCount < maxOccupiedForThisPlayer && canAffordAnother) {
                 pickingSeats = ui.promptForYesNo(player.getName() + ", would you like another seat?");
             } else {
                 pickingSeats = false;
@@ -174,8 +175,18 @@ void Table::takeBets() {
         Player* p = seat.getPlayer();
         Bankroll* br = p->getBankroll();
 
-        // Player cannot bet more than the table max OR more than they currently have
-        int maxAllowed = std::min(Rules::MAX_BET, br->getBalanceCents());
+        // Reserve MIN_BET for any remaining seats this same player still needs to bet on
+        int remainingSeatsForPlayer = 0;
+        for (size_t j = i + 1; j < seats.size(); ++j) {
+            if (seats[j].isOccupied() && seats[j].getPlayer() == p) {
+                ++remainingSeatsForPlayer;
+            }
+        }
+        int reservedCents = remainingSeatsForPlayer * Rules::MIN_BET;
+
+        // Player cannot bet more than the table max OR more than their unreserved balance
+        int availableForMain = br->getBalanceCents() - reservedCents;
+        int maxAllowed = std::min(Rules::MAX_BET, availableForMain);
 
         // Ask for the main bet, deduct it from the player's bankroll, and create their starting Hand
         int mainBet = ui.promptForInt(
@@ -186,10 +197,11 @@ void Table::takeBets() {
         br->deduct(mainBet);
         seat.addHand(Hand(mainBet));
 
-        // Optional Perfect Pairs side bet (only offered if player can still afford MIN_BET)
-        if (br->canAfford(Rules::MIN_BET) &&
+        // Optional Perfect Pairs side bet (only offered if player can still afford MIN_BET + reserved seats)
+        int availableForSide = br->getBalanceCents() - reservedCents;
+        if (availableForSide >= Rules::MIN_BET &&
             ui.promptForYesNo(p->getName() + ", place a Perfect Pairs side bet?")) {
-            int maxSide = std::min(Rules::MAX_BET, br->getBalanceCents());
+            int maxSide = std::min(Rules::MAX_BET, availableForSide);
             int sideWager = ui.promptForInt("Enter Perfect Pairs wager:", Rules::MIN_BET, maxSide);
 
             // Allocate on the heap with `new` because Seat stores base-class SideBet* pointers
@@ -200,9 +212,10 @@ void Table::takeBets() {
         }
 
         // Optional 21+3 side bet
-        if (br->canAfford(Rules::MIN_BET) &&
+        availableForSide = br->getBalanceCents() - reservedCents;
+        if (availableForSide >= Rules::MIN_BET &&
             ui.promptForYesNo(p->getName() + ", place a 21+3 side bet?")) {
-            int maxSide = std::min(Rules::MAX_BET, br->getBalanceCents());
+            int maxSide = std::min(Rules::MAX_BET, availableForSide);
             int sideWager = ui.promptForInt("Enter 21+3 wager:", Rules::MIN_BET, maxSide);
 
             SideBet* sb = new TwentyOnePlusThree(Rules::MIN_BET, Rules::MAX_BET);

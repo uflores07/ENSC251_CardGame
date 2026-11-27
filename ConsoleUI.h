@@ -2,7 +2,13 @@
 #define CONSOLEUI_H
 
 #include "Table.h"
+#include "Hand.h"
+#include "Dealer.h"
+#include "Player.h"
 #include <string>
+#include <vector>
+
+class Table;
 
 // Handles all text-based input/output and prevents invalid data from crashing the game.
 class ConsoleUI {
